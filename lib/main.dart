@@ -1,72 +1,90 @@
+import 'dart:ui' as ui;
+import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
 
 void main() {
-  runApp(const PdfTextApp());
+  runApp(MyApp());
 }
 
-class PdfTextApp extends StatelessWidget {
-  const PdfTextApp({super.key});
-
+class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PDF Text Generator',
+      title: 'Text to Image Generator',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const PdfHomePage(),
+      home: TextToImageScreen(),
     );
   }
 }
 
-class PdfHomePage extends StatefulWidget {
-  const PdfHomePage({super.key});
-
+class TextToImageScreen extends StatefulWidget {
   @override
-  _PdfHomePageState createState() => _PdfHomePageState();
+  _TextToImageScreenState createState() => _TextToImageScreenState();
 }
 
-class _PdfHomePageState extends State<PdfHomePage> {
+class _TextToImageScreenState extends State<TextToImageScreen> {
   final TextEditingController _textController = TextEditingController();
+  File? _generatedImage;
 
-  Future<void> _generatePdf() async {
-    final pdf = pw.Document();
+  Future<void> _generateImage(String text) async {
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder);
 
-    // Create a PDF document with the text input
-    pdf.addPage(
-      pw.Page(
-        build: (pw.Context context) {
-          return pw.Center(
-            child: pw.Text(_textController.text),
-          );
-        },
+    // Define the size of the canvas
+    const double width = 300;
+    const double height = 100;
+
+    // Draw white background
+    final Paint paint = Paint()..color = Colors.white;
+    canvas.drawRect(Rect.fromLTWH(0, 0, width, height), paint);
+
+    // Draw the text on the canvas
+    final TextPainter textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(color: Colors.black, fontSize: 30),
       ),
+      textDirection: TextDirection.ltr,
     );
 
-    // Save the PDF file to the device's temporary storage
-    final output = await getTemporaryDirectory();
-    final file = File("${output.path}/example.pdf");
-    await file.writeAsBytes(await pdf.save());
+    textPainter.layout(minWidth: 0, maxWidth: width);
+    textPainter.paint(canvas, Offset(10, 25));
 
-    // Display the PDF using the Printing package
-    await Printing.sharePdf(
-      bytes: await pdf.save(),
-      filename: 'example.pdf',
-    );
+    final ui.Image image = await recorder.endRecording().toImage(width.toInt(), height.toInt());
 
-    // Clear the text field after the PDF is generated and displayed
-    _textController.clear();
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null) {
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      // Save the image to a file
+      final Directory tempDir = await getTemporaryDirectory();
+      final File file = File('${tempDir.path}/generated_image.png');
+      await file.writeAsBytes(pngBytes);
+
+      setState(() {
+        _generatedImage = file;
+        _textController.clear(); // Clear the text field after generating the image
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Image saved to: ${file.path}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to generate image')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PDF Text Generator'),
+        title: Text('Text to Image Generator'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -74,17 +92,27 @@ class _PdfHomePageState extends State<PdfHomePage> {
           children: [
             TextField(
               controller: _textController,
-              decoration: const InputDecoration(
-                labelText: 'Enter your text here',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: 'Enter text to generate image',
               ),
-              maxLines: null,
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: 20),
             ElevatedButton(
-              onPressed: _generatePdf,
-              child: const Text('Generate PDF'),
+              onPressed: () {
+                if (_textController.text.isNotEmpty) {
+                  _generateImage(_textController.text);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please enter some text')),
+                  );
+                }
+              },
+              child: Text('Generate Image'),
             ),
+            SizedBox(height: 20),
+            _generatedImage != null
+                ? Image.file(_generatedImage!)
+                : Text('No image generated yet'),
           ],
         ),
       ),
